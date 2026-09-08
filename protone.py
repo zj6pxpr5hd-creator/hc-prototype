@@ -8,6 +8,7 @@ import whisper
 from dotenv import load_dotenv
 
 from extract_hook import extract_hook
+from feedback import save_feedback
 from video_to_mp3 import video_to_mp3
 
 
@@ -48,7 +49,7 @@ HOOK TO REVIEW:
 """
 
     interaction = client.interactions.create(
-        model="models/gemini-3-flash-preview",
+        model="models/gemini-3.7-flash",
         system_instruction="You are a strict, expert short-form video content critic.",
         input=prompt,
         generation_config={
@@ -89,6 +90,33 @@ def show_evaluation(result):
     if suggestion:
         st.subheader("Suggested improvement")
         st.write(suggestion)
+
+
+def render_feedback():
+    st.divider()
+    st.subheader("Share your feedback")
+    st.write("Tell us what worked, what did not, or which feature you would like to see next.")
+
+    with st.form("feedback_form", clear_on_submit=True):
+        category = st.selectbox(
+            "Feedback type",
+            ["Bug", "Feature request", "General feedback"],
+        )
+        message = st.text_area("Your feedback", placeholder="Write your feedback here...")
+        email = st.text_input("Email (optional)", placeholder="you@example.com")
+        submitted = st.form_submit_button("Send feedback")
+
+    if submitted:
+        if not message.strip():
+            st.warning("Please enter some feedback before sending.")
+            return
+
+        try:
+            save_feedback(category, message, email)
+        except Exception as error:
+            st.error(f"Feedback could not be sent: {error}")
+        else:
+            st.success("Thanks for your feedback!")
 
 
 def process_video(uploaded_file, api_key):
@@ -133,8 +161,15 @@ def main():
     )
 
     if uploaded_file is None:
+        st.session_state.pop("evaluation", None)
+        st.session_state.pop("uploaded_signature", None)
         st.info("Select an MP4 or MOV video to get started.")
         return
+
+    uploaded_signature = (uploaded_file.name, uploaded_file.size)
+    if st.session_state.get("uploaded_signature") != uploaded_signature:
+        st.session_state.pop("evaluation", None)
+        st.session_state["uploaded_signature"] = uploaded_signature
 
     if uploaded_file.size > MAX_UPLOAD_SIZE:
         st.error("The video is larger than the 500 MB limit.")
@@ -147,10 +182,15 @@ def main():
 
     if st.button("Analyze video", type="primary"):
         try:
-            result = process_video(uploaded_file, api_key)
-            show_evaluation(result)
+            st.session_state["evaluation"] = process_video(uploaded_file, api_key)
         except Exception as error:
+            st.session_state.pop("evaluation", None)
             st.error(str(error))
+
+    evaluation = st.session_state.get("evaluation")
+    if evaluation:
+        show_evaluation(evaluation)
+        render_feedback()
 
 
 if __name__ == "__main__":

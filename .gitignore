@@ -4,3 +4,5 @@ __pycache__/
 *.py[cod]
 venv/
 test.mp3
+.streamlit/secrets.toml
+google-service-account*.json

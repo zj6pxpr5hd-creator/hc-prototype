@@ -2,3 +2,6 @@ openai-whisper
 google-genai
 python-dotenv
 streamlit
+gspread
+google-auth
+requests

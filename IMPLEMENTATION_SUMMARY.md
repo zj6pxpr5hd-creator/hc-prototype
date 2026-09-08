@@ -17,6 +17,7 @@ The core application with the following key functions:
   2. Transcribes audio using Whisper
   3. Extracts hook (first 3 seconds of speech)
   4. Sends to Gemini for evaluation
+- **`render_feedback()`**: Shows a feedback form only after a successful analysis and saves category, message, optional email, and UTC timestamp to Google Sheets.
 - **`main()`**: Streamlit UI with:
   - File uploader (MP4/MOV, max 500MB)
   - API key validation
@@ -40,6 +41,8 @@ Extracts speech from the first N seconds (default 3):
 - `openai-whisper` - Audio transcription
 - `google-genai` - Gemini AI integration
 - `python-dotenv` - Environment variable loading
+- `gspread` - Google Sheets feedback storage
+- `google-auth` - Google service account authentication
 - `ffmpeg` - Audio extraction (system dependency)
 
 ## Setup & Running
@@ -72,6 +75,7 @@ GEMINI_API_KEY=your_gemini_api_key_here
 4. Hook extracted (first 3 seconds)
 5. Gemini evaluates hook effectiveness
 6. Results displayed in UI with score, strengths, weaknesses, and suggestions
+7. Feedback form appears after a successful response and stores submissions in Google Sheets
 
 ## Implementation Status
 ✅ Complete and fully functional
