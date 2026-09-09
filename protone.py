@@ -4,6 +4,7 @@ import tempfile
 from pathlib import Path
 
 import streamlit as st
+import streamlit.components.v1 as components
 import whisper
 from dotenv import load_dotenv
 
@@ -29,12 +30,35 @@ CONTEXT:
 You are evaluating short-form video hooks (the first few seconds of a TikTok/Reels/YouTube Short) for how well they grab attention.
 
 TASK:
-Review the following hook and judge how effective it is at stopping someone from scrolling.
+Review the following hook and judge how effective it is at stopping someone from scrolling. Provide both an overall score and a breakdown of objective sub-metrics that explain WHY the score is what it is.
 
 OUTPUT FORMAT:
 Return ONLY valid JSON in this exact structure:
 {{
   "score": <number from 1 to 10>,
+  "metrics": {{
+    "curiosity_gap": {{
+      "score": <1-10>,
+      "explanation": "..."
+    }},
+    "pacing": {{
+      "score": <1-10>,
+      "explanation": "is the first idea delivered fast enough, or is it buried under filler words/slow setup?"
+    }},
+    "specificity": {{
+      "score": <1-10>,
+      "explanation": "is the hook concrete and specific, or vague/generic?"
+    }},
+    "emotional_trigger": {{
+      "type": "e.g. surprise, FOMO, fear, humor, controversy, none",
+      "strength": <1-10>
+    }},
+    "hook_pattern": "e.g. shocking statistic, provocative question, pattern interrupt, bold claim, in-medias-res story, none detected",
+    "payoff_clarity": {{
+      "score": <1-10>,
+      "explanation": "does the hook clearly imply what the viewer will get if they keep watching?"
+    }}
+  }},
   "strengths": ["...", "..."],
   "weaknesses": ["...", "..."],
   "suggestion": "one improved version of the hook"
@@ -42,6 +66,8 @@ Return ONLY valid JSON in this exact structure:
 
 RULES:
 - Be honest and critical, don't just give high scores by default.
+- Each metric score must be justified in the explanation field, referencing specific words/phrases from the hook when possible.
+- The overall "score" should reflect a weighted judgment across the metrics, not just an average — explain implicitly through strengths/weaknesses if one metric dominates.
 - Do not include any text outside the JSON.
 
 HOOK TO REVIEW:
@@ -71,25 +97,109 @@ def show_evaluation(result):
         return
 
     score = evaluation.get("score")
+    metrics = evaluation.get("metrics", {})
     if score is not None:
-        st.metric("Hook score", f"{score}/10")
+        with st.container(border=True):
+            st.subheader("Overall performance")
+            st.metric("Hook score", f"{score}/10")
+
+    scored_metrics = [
+        ("Curiosity gap", "curiosity_gap"),
+        ("Pacing", "pacing"),
+        ("Specificity", "specificity"),
+        ("Payoff clarity", "payoff_clarity"),
+    ]
+    available_metrics = [
+        (label, metrics.get(key, {}))
+        for label, key in scored_metrics
+        if metrics.get(key)
+    ]
+    if available_metrics:
+        st.divider()
+        st.subheader("Metric breakdown")
+        metric_columns = st.columns(len(available_metrics))
+        for column, (label, metric) in zip(metric_columns, available_metrics):
+            with column:
+                metric_score = metric.get("score")
+                if metric_score is not None:
+                    st.metric(label, f"{metric_score}/10")
+                explanation = metric.get("explanation")
+                if explanation:
+                    st.caption(explanation)
+
+    emotional_trigger = metrics.get("emotional_trigger", {})
+    trigger_type = emotional_trigger.get("type")
+    trigger_strength = emotional_trigger.get("strength")
+    hook_pattern = metrics.get("hook_pattern")
+    if trigger_type or trigger_strength is not None or hook_pattern:
+        st.divider()
+        st.subheader("Hook profile")
+        profile_columns = st.columns(2)
+        with profile_columns[0]:
+            if trigger_type or trigger_strength is not None:
+                st.markdown("**Emotional trigger**")
+                if trigger_type:
+                    st.write(trigger_type)
+                if trigger_strength is not None:
+                    st.metric("Trigger strength", f"{trigger_strength}/10")
+        with profile_columns[1]:
+            if hook_pattern:
+                st.markdown("**Hook pattern**")
+                st.write(hook_pattern)
 
     strengths = evaluation.get("strengths", [])
-    if strengths:
-        st.subheader("Strengths")
-        for strength in strengths:
-            st.write(f"- {strength}")
-
     weaknesses = evaluation.get("weaknesses", [])
-    if weaknesses:
-        st.subheader("Weaknesses")
-        for weakness in weaknesses:
-            st.write(f"- {weakness}")
+    if strengths or weaknesses:
+        st.divider()
+        st.subheader("What is working and what to refine")
+        insight_columns = st.columns(2)
+        with insight_columns[0]:
+            if strengths:
+                with st.container(border=True):
+                    st.markdown("**Strengths**")
+                    for strength in strengths:
+                        st.write(f"- {strength}")
+        with insight_columns[1]:
+            if weaknesses:
+                with st.container(border=True):
+                    st.markdown("**Weaknesses**")
+                    for weakness in weaknesses:
+                        st.write(f"- {weakness}")
 
     suggestion = evaluation.get("suggestion")
     if suggestion:
-        st.subheader("Suggested improvement")
-        st.write(suggestion)
+        st.divider()
+        with st.container(border=True):
+            st.subheader("Suggested improvement")
+            suggestion_columns = st.columns([5, 1])
+            with suggestion_columns[0]:
+                st.write(suggestion)
+            with suggestion_columns[1]:
+                suggestion_json = json.dumps(suggestion).replace("<", "\\u003c")
+                components.html(
+                    f"""
+                    <button
+                        onclick='copySuggestion()'
+                        style="width:100%; padding:0.5rem; cursor:pointer;"
+                    >
+                        Copy
+                    </button>
+                    <script>
+                        const suggestion = {suggestion_json};
+
+                        async function copySuggestion() {{
+                            const button = document.querySelector("button");
+                            try {{
+                                await navigator.clipboard.writeText(suggestion);
+                                button.textContent = "Copied";
+                            }} catch (error) {{
+                                button.textContent = "Copy failed";
+                            }}
+                        }}
+                    </script>
+                    """,
+                    height=48,
+                )
 
 
 def render_feedback():

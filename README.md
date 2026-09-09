@@ -5,14 +5,14 @@ Hook Checker analyzes the first three seconds of an uploaded video and evaluates
 ## Requirements
 
 - Python 3.14+
-- FFmpeg available in `PATH`
 - A Gemini API key
-- A Google Sheet and service account for feedback storage
+- A Google Sheet for feedback storage
 
 ## Install and run
 
 ```bash
 ./venv/bin/pip install -r requirements.txt
+./venv/bin/pip install -r packages.txt
 ./venv/bin/streamlit run protone.py
 ```
 
@@ -20,39 +20,23 @@ Create a `.env` file with:
 
 ```text
 GEMINI_API_KEY=your_gemini_api_key
-GOOGLE_SHEET_NAME=the_exact_google_sheet_name
-GOOGLE_WORKSHEET_NAME=Feedback
 ```
 
 ## Configure Google Sheets feedback
 
-1. Create a Google Cloud project and enable Google Sheets API and Google Drive API.
-2. Create a service account and download its JSON credentials.
-3. Share the target Google Sheet with the service account email as an editor.
-4. Configure the credentials without committing them.
+1. Open your Google Sheet, then go to Extensions → Apps Script. A code editor linked to that specific sheet will open.
 
-For local development, set the complete JSON document as one environment variable:
+2. Write the function that receives the data
+Delete the example code and paste a doPost(e) function that reads the received data (in JSON format) and adds it as a new row in the sheet with SpreadsheetApp.getActiveSheet().appendRow(...).
 
-```bash
-export GOOGLE_SERVICE_ACCOUNT_JSON='{"type":"service_account", ...}'
-```
+3. Publish as a Web App
+Click "Deploy" → "New Deployment" → "Web Application" type. Set "Who has access" to "Anyone" (this is necessary so your Python script can call it externally). Click Deploy.
 
-For Streamlit deployment, add the credentials to `.streamlit/secrets.toml` instead:
+4. Copy the generated URL
+After deployment, Google will provide you with a unique URL (such as https://script.google.com/macros/s/XXXXX/exec). This is the address your Python script will send the data to.
 
-```toml
-GOOGLE_SHEET_NAME = "the_exact_google_sheet_name"
-GOOGLE_WORKSHEET_NAME = "Feedback"
-
-[google_service_account]
-type = "service_account"
-project_id = "your-project-id"
-private_key_id = "your-key-id"
-private_key = "-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
-client_email = "service-account@your-project.iam.gserviceaccount.com"
-client_id = "your-client-id"
-```
-
-Never commit `.env`, `.streamlit/secrets.toml`, or service-account JSON files.
+5. Call the URL from Python with request.post()
+In your Streamlit script, simply use the request library to send a POST with the feedback data to that URL—no complex authentication required.
 
 ## Feedback flow
 
