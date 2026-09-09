@@ -7,6 +7,7 @@ Hook Checker analyzes the first three seconds of an uploaded video and evaluates
 - Python 3.14+
 - A Gemini API key
 - A Google Sheet for feedback storage
+- OpenCV for visual motion analysis
 
 ## Install and run
 
@@ -41,3 +42,5 @@ In your Streamlit script, simply use the request library to send a POST with the
 ## Feedback flow
 
 The feedback form appears only after a video has been analyzed successfully. It stores the UTC timestamp, category, message, and optional email in the configured worksheet. Videos, audio files, transcriptions, hook text, and API keys are not stored with feedback.
+
+The visual analysis samples up to 10 grayscale frames per second from the first three seconds. Gemini receives this motion signal as supplementary context and returns a visual-perspective assessment. If the video cannot be read by OpenCV, the regular audio and text analysis can still continue.

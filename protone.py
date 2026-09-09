@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 
 from extract_hook import extract_hook
 from feedback import save_feedback
+from motion_score import calculate_motion_profile
 from video_to_mp3 import video_to_mp3
 
 
@@ -21,7 +22,7 @@ def load_whisper_model():
     return whisper.load_model("base")
 
 
-def evaluate_hook(hook, api_key):
+def evaluate_hook(hook, api_key, motion_profile=None):
     from google import genai
 
     client = genai.Client(api_key=api_key)
@@ -59,6 +60,10 @@ Return ONLY valid JSON in this exact structure:
       "explanation": "does the hook clearly imply what the viewer will get if they keep watching?"
     }}
   }},
+    "visual_perspective": {{
+        "score": <number from 1 to 10, or null if visual context is unavailable>,
+        "explanation": "..."
+    }},
   "strengths": ["...", "..."],
   "weaknesses": ["...", "..."],
   "suggestion": "one improved version of the hook"
@@ -68,14 +73,21 @@ RULES:
 - Be honest and critical, don't just give high scores by default.
 - Each metric score must be justified in the explanation field, referencing specific words/phrases from the hook when possible.
 - The overall "score" should reflect a weighted judgment across the metrics, not just an average — explain implicitly through strengths/weaknesses if one metric dominates.
+- Treat "visual_perspective.score" as an independent 1-10 judgment of visual hook quality, not as a conversion of the motion profile. Never copy, average, normalize, or threshold the profile into that score.
+- The motion profile measures normalized mean absolute grayscale pixel differences between sampled frames. It measures temporal pixel change only; it cannot establish composition, clarity, readability, semantic relevance, visual appeal, or production quality.
+- High change can come from cuts, camera shake, exposure changes, compression artifacts, or noise. Low change can be intentional and effective. Use the average, p95, peak, and high-change ratio to distinguish sustained movement from isolated changes.
+- If the motion profile is null, set "visual_perspective.score" to null and explain that visual analysis is unavailable. If it is present, mention its limitations rather than treating it as a quality verdict.
 - Do not include any text outside the JSON.
+
+VISUAL MOTION PROFILE (JSON MEASUREMENTS ONLY):
+{json.dumps(motion_profile, ensure_ascii=True, allow_nan=False, separators=(",", ":"))}
 
 HOOK TO REVIEW:
 "{hook}"
 """
 
     interaction = client.interactions.create(
-        model="models/gemini-3.7-flash",
+        model="models/gemini-3.6-flash",
         system_instruction="You are a strict, expert short-form video content critic.",
         input=prompt,
         generation_config={
@@ -146,6 +158,19 @@ def show_evaluation(result):
             if hook_pattern:
                 st.markdown("**Hook pattern**")
                 st.write(hook_pattern)
+
+    visual_perspective = evaluation.get("visual_perspective", {})
+    if visual_perspective:
+        visual_score = visual_perspective.get("score")
+        visual_explanation = visual_perspective.get("explanation")
+        if visual_score is not None or visual_explanation:
+            st.divider()
+            with st.container(border=True):
+                st.subheader("Visual perspective")
+                if visual_score is not None:
+                    st.metric("Visual hook score", f"{visual_score}/10")
+                if visual_explanation:
+                    st.write(visual_explanation)
 
     strengths = evaluation.get("strengths", [])
     weaknesses = evaluation.get("weaknesses", [])
@@ -237,6 +262,11 @@ def process_video(uploaded_file, api_key):
         video_path = temporary_path / f"input{suffix}"
         audio_path = temporary_path / "audio.mp3"
         video_path.write_bytes(uploaded_file.getbuffer())
+        motion_profile = calculate_motion_profile(
+            video_path,
+            max_seconds=3,
+            sample_rate=10,
+        )
 
         with st.status("Processing video...", expanded=True) as status:
             st.write("Extracting audio")
@@ -252,7 +282,7 @@ def process_video(uploaded_file, api_key):
                 raise ValueError("No speech was detected in the first three seconds.")
 
             st.write("Evaluating hook")
-            evaluation = evaluate_hook(hook, api_key)
+            evaluation = evaluate_hook(hook, api_key, motion_profile)
             status.update(label="Analysis complete", state="complete")
 
     return evaluation
@@ -267,7 +297,7 @@ def main():
     uploaded_file = st.file_uploader(
         "Choose a video",
         type=["mp4", "mov"],
-        help="Supported formats: MP4 and MOV. Maximum size: 500 MB.",
+        help="Supported formats: MP4 and MOV. Maximum size: 200 MB.",
     )
 
     if uploaded_file is None:

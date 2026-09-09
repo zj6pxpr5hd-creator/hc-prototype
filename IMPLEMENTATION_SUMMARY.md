@@ -9,14 +9,16 @@ A Streamlit-based web application that analyzes short-form video hooks (first 3 
 The core application with the following key functions:
 
 - **`load_whisper_model()`**: Caches OpenAI Whisper "base" model for audio transcription
-- **`evaluate_hook(hook, api_key)`**: Uses Google Gemini API to evaluate hook effectiveness
-  - Returns JSON with: score (1-10), strengths, weaknesses, and improvement suggestion
+- **`evaluate_hook(hook, api_key, motion_score=None)`**: Uses Google Gemini API to evaluate hook effectiveness
+  - Receives an optional OpenCV motion signal as supplementary context
+  - Returns JSON with: score (1-10), text metrics, visual perspective, strengths, weaknesses, and improvement suggestion
 - **`show_evaluation(result)`**: Renders evaluation results in Streamlit UI
 - **`process_video(uploaded_file, api_key)`**: Main pipeline that:
-  1. Extracts audio from video using FFmpeg
-  2. Transcribes audio using Whisper
-  3. Extracts hook (first 3 seconds of speech)
-  4. Sends to Gemini for evaluation
+  1. Computes an optional grayscale motion signal from up to 10 frames per second in the first 3 seconds
+  2. Extracts audio from video using FFmpeg
+  3. Transcribes audio using Whisper
+  4. Extracts hook (first 3 seconds of speech)
+  5. Sends the hook and motion signal to Gemini for evaluation
 - **`render_feedback()`**: Shows a feedback form only after a successful analysis and saves category, message, optional email, and UTC timestamp to Google Sheets.
 - **`main()`**: Streamlit UI with:
   - File uploader (MP4/MOV, max 500MB)
@@ -43,6 +45,7 @@ Extracts speech from the first N seconds (default 3):
 - `python-dotenv` - Environment variable loading
 - `gspread` - Google Sheets feedback storage
 - `google-auth` - Google service account authentication
+- `opencv-python-headless` - Grayscale frame sampling for visual motion context
 - `ffmpeg` - Audio extraction (system dependency)
 
 ## Setup & Running
@@ -73,9 +76,10 @@ GEMINI_API_KEY=your_gemini_api_key_here
 2. System extracts audio → MP3
 3. Whisper transcribes audio
 4. Hook extracted (first 3 seconds)
-5. Gemini evaluates hook effectiveness
-6. Results displayed in UI with score, strengths, weaknesses, and suggestions
-7. Feedback form appears after a successful response and stores submissions in Google Sheets
+5. OpenCV computes an optional motion signal from sampled grayscale frames
+6. Gemini evaluates hook effectiveness and provides a visual-perspective assessment
+7. Results displayed in UI with score, metrics, visual perspective, strengths, weaknesses, and suggestions
+8. Feedback form appears after a successful response and stores submissions in Google Sheets
 
 ## Implementation Status
 ✅ Complete and fully functional
