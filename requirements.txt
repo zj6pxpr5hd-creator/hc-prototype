@@ -6,3 +6,4 @@ gspread
 google-auth
 requests
 opencv-python-headless==4.12.0.88
+pydantic

@@ -12,9 +12,70 @@ from extract_hook import extract_hook
 from feedback import save_feedback
 from motion_score import calculate_motion_profile
 from video_to_mp3 import video_to_mp3
+from typing import Literal
 
+from pydantic import BaseModel, Field, ValidationError
 
 MAX_UPLOAD_SIZE = 500 * 1024 * 1024
+
+class ScoredMetric(BaseModel):
+    score: int = Field(ge=1, le=10, description="Score from 1 to 10.")
+    explanation: str = Field(
+        description="Concise 1-2 sentence explanation referencing specific words/phrases from the hook."
+    )
+
+class EmotionalTrigger(BaseModel):
+    type: str = Field(
+        description="Primary emotion triggered, e.g., 'surprise', 'FOMO', 'fear', 'humor', 'controversy', 'curiosity', or 'none'."
+    )
+    strength: int = Field(
+        ge=1, le=10, 
+        description="Intensity of the emotional pull from 1 to 10."
+    )
+
+class VisualPerspective(BaseModel):
+    score: int | None = Field(
+        default=None, ge=1, le=10, 
+        description="Visual quality/potential score (1-10), or null if no visual data was provided."
+    )
+    explanation: str = Field(
+        description="Brief critique of visual movement, composition, or potential framing based on motion data."
+    )
+
+class HookMetrics(BaseModel):
+    curiosity_gap: ScoredMetric = Field(
+        description="Evaluates how effectively the hook leaves a compelling unanswered question without being cheap clickbait."
+    )
+    pacing: ScoredMetric = Field(
+        description="Evaluates speech speed, word density, and removal of filler words in the first 3 seconds."
+    )
+    specificity: ScoredMetric = Field(
+        description="Evaluates whether the hook uses concrete numbers/details vs generic statements."
+    )
+    emotional_trigger: EmotionalTrigger
+    hook_pattern: str = Field(
+        description="The structural formula used, e.g., 'shocking statistic', 'provocative question', 'pattern interrupt', 'bold claim'."
+    )
+    payoff_clarity: ScoredMetric = Field(
+        description="Evaluates how clearly the viewer understands what value they will gain by staying."
+    )
+
+class HookEvaluation(BaseModel):
+    score: int = Field(
+        ge=1, le=10, 
+        description="Overall holistic hook score from 1 to 10. Reflects weighted impact, not a strict average."
+    )
+    metrics: HookMetrics
+    visual_perspective: VisualPerspective
+    strengths: list[str] = Field(
+        description="2 to 3 short bullet points highlighting what worked. Max 15 words per point."
+    )
+    weaknesses: list[str] = Field(
+        description="2 to 3 short bullet points highlighting what dragged or failed. Max 15 words per point."
+    )
+    suggestion: str = Field(
+        description="CRITICAL: Output ONLY the exact raw script text for the revised hook. Do NOT add preamble, intro text, quotation marks, or explanations like 'I chose this because...'. Just the spoken words."
+    )
 
 
 @st.cache_resource
@@ -27,77 +88,48 @@ def evaluate_hook(hook, api_key, motion_profile=None):
 
     client = genai.Client(api_key=api_key)
     prompt = f"""
-CONTEXT:
-You are evaluating short-form video hooks (the first few seconds of a TikTok/Reels/YouTube Short) for how well they grab attention.
+        ROLE & GOAL:
+        You are an expert short-form content director (TikTok, Reels, Shorts). 
+        Your task is to evaluate the provided video hook and provide a rigorous, honest critique.
 
-TASK:
-Review the following hook and judge how effective it is at stopping someone from scrolling. Provide both an overall score and a breakdown of objective sub-metrics that explain WHY the score is what it is.
+        INPUT DATA:
+        - Text Hook: "{hook}"
+        - Visual Motion Profile: {json.dumps(motion_profile, ensure_ascii=True, allow_nan=False, separators=(",", ":"))}
 
-OUTPUT FORMAT:
-Return ONLY valid JSON in this exact structure:
-{{
-  "score": <number from 1 to 10>,
-  "metrics": {{
-    "curiosity_gap": {{
-      "score": <1-10>,
-      "explanation": "..."
-    }},
-    "pacing": {{
-      "score": <1-10>,
-      "explanation": "is the first idea delivered fast enough, or is it buried under filler words/slow setup?"
-    }},
-    "specificity": {{
-      "score": <1-10>,
-      "explanation": "is the hook concrete and specific, or vague/generic?"
-    }},
-    "emotional_trigger": {{
-      "type": "e.g. surprise, FOMO, fear, humor, controversy, none",
-      "strength": <1-10>
-    }},
-    "hook_pattern": "e.g. shocking statistic, provocative question, pattern interrupt, bold claim, in-medias-res story, none detected",
-    "payoff_clarity": {{
-      "score": <1-10>,
-      "explanation": "does the hook clearly imply what the viewer will get if they keep watching?"
-    }}
-  }},
-    "visual_perspective": {{
-        "score": <number from 1 to 10, or null if visual context is unavailable>,
-        "explanation": "..."
-    }},
-  "strengths": ["...", "..."],
-  "weaknesses": ["...", "..."],
-  "suggestion": "one improved version of the hook"
-}}
-
-RULES:
-- Be honest and critical, don't just give high scores by default.
-- Each metric score must be justified in the explanation field, referencing specific words/phrases from the hook when possible.
-- The overall "score" should reflect a weighted judgment across the metrics, not just an average — explain implicitly through strengths/weaknesses if one metric dominates.
-- Treat "visual_perspective.score" as an independent 1-10 judgment of visual hook quality, not as a conversion of the motion profile. Never copy, average, normalize, or threshold the profile into that score.
-- The motion profile measures normalized mean absolute grayscale pixel differences between sampled frames. It measures temporal pixel change only; it cannot establish composition, clarity, readability, semantic relevance, visual appeal, or production quality.
-- High change can come from cuts, camera shake, exposure changes, compression artifacts, or noise. Low change can be intentional and effective. Use the average, p95, peak, and high-change ratio to distinguish sustained movement from isolated changes.
-- If the motion profile is null, set "visual_perspective.score" to null and explain that visual analysis is unavailable. If it is present, mention its limitations rather than treating it as a quality verdict.
-- Do not include any text outside the JSON.
-
-VISUAL MOTION PROFILE (JSON MEASUREMENTS ONLY):
-{json.dumps(motion_profile, ensure_ascii=True, allow_nan=False, separators=(",", ":"))}
-
-HOOK TO REVIEW:
-"{hook}"
-"""
+        EVALUATION GUIDELINES:
+        1. Honest Scoring: Do not give default high scores. A score of 5/10 is average. 8+ must be exceptional.
+        2. Grounded Explanations: Reference specific words or phrases from the text hook in your metric explanations.
+        3. Weighted Overall Score: The overall score is a holistic judgment, not a strict mathematical average of sub-metrics.
+        4. Visual Perspective Evaluation:
+        - If Visual Motion Profile is null: Set visual_perspective.score to null and explain that visual data was not provided.
+        - If Visual Motion Profile is present: The score must reflect your independent qualitative judgment of visual potential/quality. Do NOT copy or threshold the raw motion metrics.
+        - Understand motion metrics limitations: High pixel changes can stem from camera shake, lighting shifts, or edits; low motion can be intentional. Mention these nuances in the explanation.
+    """
 
     interaction = client.interactions.create(
         model="models/gemini-3.6-flash",
         system_instruction="You are a strict, expert short-form video content critic.",
         input=prompt,
+        response_format={
+            "type": "text",
+            "mime_type": "application/json",
+            "schema": HookEvaluation.model_json_schema(),
+        },
         generation_config={
             "temperature": 1,
-            "max_output_tokens": 1000,
+            "max_output_tokens": 2000,
             "top_p": 0.95,
             "thinking_level": "low",
         },
     )
-    return interaction.output_text
+
+    try:
+        evaluation = HookEvaluation.model_validate_json(interaction.output_text)
+    except ValidationError as e:
+        st.error(f"Error validating evaluation: {e}")
+        return None
+
+    return evaluation.model_dump_json()
 
 
 def show_evaluation(result):
