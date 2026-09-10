@@ -1,5 +1,6 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch
 openai-whisper
-torch==2.x.x+cpu --extra-index-url https://download.pytorch.org/whl/cpu
 google-genai
 python-dotenv
 streamlit
