@@ -107,7 +107,7 @@ def evaluate_hook(hook, api_key, motion_profile=None):
     """
 
     interaction = client.interactions.create(
-        model="models/gemini-3-flash-preview",
+        model="models/gemini-3.5-flash-lite",
         system_instruction="You are a strict, expert short-form video content critic.",
         input=prompt,
         response_format={
