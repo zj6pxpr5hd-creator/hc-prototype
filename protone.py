@@ -12,7 +12,6 @@ from extract_hook import extract_hook
 from feedback import save_feedback
 from motion_score import calculate_motion_profile
 from video_to_mp3 import video_to_mp3
-from typing import Literal
 
 from pydantic import BaseModel, Field, ValidationError
 
@@ -85,6 +84,7 @@ def load_whisper_model():
 
 def evaluate_hook(hook, api_key, motion_profile=None):
     from google import genai
+    from google.genai import types
 
     client = genai.Client(api_key=api_key)
     prompt = f"""
@@ -106,25 +106,23 @@ def evaluate_hook(hook, api_key, motion_profile=None):
         - Understand motion metrics limitations: High pixel changes can stem from camera shake, lighting shifts, or edits; low motion can be intentional. Mention these nuances in the explanation.
     """
 
-    interaction = client.interactions.create(
-        model="models/gemini-3.5-flash-lite",
-        system_instruction="You are a strict, expert short-form video content critic.",
-        input=prompt,
-        response_format={
-            "type": "text",
-            "mime_type": "application/json",
-            "schema": HookEvaluation.model_json_schema(),
-        },
-        generation_config={
-            "temperature": 1,
-            "max_output_tokens": 2000,
-            "top_p": 0.95,
-            "thinking_level": "low",
-        },
+    response = client.models.generate_content(
+        model="gemini-3.5-flash-lite",
+        contents=prompt,
+        config=types.GenerateContentConfig(
+            system_instruction=(
+                "You are a strict, expert short-form video content critic."
+            ),
+            response_mime_type="application/json",
+            response_schema=HookEvaluation,
+            temperature=1,
+            max_output_tokens=2000,
+            top_p=0.95,
+        ),
     )
 
     try:
-        evaluation = HookEvaluation.model_validate_json(interaction.output_text)
+        evaluation = HookEvaluation.model_validate_json(response.text)
     except ValidationError as e:
         st.error(f"Error validating evaluation: {e}")
         return None
