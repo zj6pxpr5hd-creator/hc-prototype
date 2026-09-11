@@ -2,6 +2,15 @@
 
 Hook Checker analyzes the first three seconds of an uploaded video and evaluates the hook with Whisper and Gemini.
 
+## Sample videos
+
+The app includes two optional sample-video presets near the upload control:
+
+- `assets/samples/great_hook.mp4` for a strong hook example
+- `assets/samples/bad_hook.mp4` for a weak hook example
+
+Add the approved video files at those exact paths to enable the presets. Each file should be a playable MP4 with an audio track and spoken content during its first three seconds. The files are previewed in the app and selecting a preset starts analysis immediately.
+
 ## Requirements
 
 - Python 3.14+

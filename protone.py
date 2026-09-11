@@ -32,6 +32,22 @@ from card_generator import generate_dm_summary_card
 
 # Allow uploaded videos to be at most 500 megabytes in size.
 MAX_UPLOAD_SIZE = 500 * 1024 * 1024
+# Keep sample previews compact so they remain secondary to the upload workflow.
+SAMPLE_VIDEO_WIDTH = 240
+
+# Keep optional sample videos local so they can be previewed without an upload.
+SAMPLE_VIDEOS = {
+    "great_hook": {
+        "label": "Great hook",
+        "description": "A strong opening example.",
+        "path": Path(__file__).parent / "assets" / "samples" / "great_hook.mp4",
+    },
+    "bad_hook": {
+        "label": "Bad hook",
+        "description": "A weak opening example.",
+        "path": Path(__file__).parent / "assets" / "samples" / "bad_hook.mp4",
+    },
+}
 
 # Describe one scored part of the hook evaluation.
 class ScoredMetric(BaseModel):
@@ -439,21 +455,18 @@ def render_feedback():
             st.success("Thanks for your feedback!")
 
 
-# Convert the uploaded video, transcribe its opening, and evaluate the hook.
-def process_video(uploaded_file, api_key):
-    # Keep the uploaded file's extension so temporary conversion tools recognize its type.
-    suffix = Path(uploaded_file.name).suffix.lower()
+# Process a filesystem video, transcribe its opening, and evaluate the hook.
+def process_video(video_path, api_key):
+    # Convert the input to a Path so uploads and samples use one processing workflow.
+    video_path = Path(video_path)
+    # Reject missing sample files before opening a progress status.
+    if not video_path.is_file():
+        raise FileNotFoundError(f"Sample video not found: {video_path.name}")
 
     # Create a temporary folder that is deleted automatically after processing finishes.
     with tempfile.TemporaryDirectory() as temporary_directory:
-        # Convert the temporary-folder name into a Path object.
-        temporary_path = Path(temporary_directory)
-        # Choose the temporary path where the uploaded video will be stored.
-        video_path = temporary_path / f"input{suffix}"
         # Choose the temporary path where extracted audio will be stored.
-        audio_path = temporary_path / "audio.mp3"
-        # Write the uploaded video bytes to the temporary video file.
-        video_path.write_bytes(uploaded_file.getbuffer())
+        audio_path = Path(temporary_directory) / "audio.mp3"
         # Measure motion in the first three seconds using ten samples per second.
         motion_profile = calculate_motion_profile(
             video_path,
@@ -495,6 +508,21 @@ def process_video(uploaded_file, api_key):
     return evaluation
 
 
+# Store an upload temporarily before passing it through the shared path workflow.
+def process_uploaded_video(uploaded_file, api_key):
+    # Keep the uploaded file's extension so media tools recognize its type.
+    suffix = Path(uploaded_file.name).suffix.lower()
+
+    # Keep the uploaded file alive while its audio is extracted and transcribed.
+    with tempfile.TemporaryDirectory() as temporary_directory:
+        # Choose the temporary path where the uploaded video will be stored.
+        video_path = Path(temporary_directory) / f"input{suffix}"
+        # Write the uploaded video bytes to the temporary video file.
+        video_path.write_bytes(uploaded_file.getbuffer())
+        # Run the same processing path used by bundled samples.
+        return process_video(video_path, api_key)
+
+
 # Configure the Streamlit page and coordinate the complete user workflow.
 def main():
     # Load variables from a local .env file into the process environment.
@@ -506,35 +534,80 @@ def main():
     # Explain the app's purpose below the heading.
     st.write("Upload a video to extract and evaluate its opening hook.")
 
-    # Display a file picker restricted to MP4 and MOV videos.
+    # Keep the primary upload workflow first and visually dominant.
     uploaded_file = st.file_uploader(
         "Choose a video",
         type=["mp4", "mov"],
-        help="Supported formats: MP4 and MOV. Maximum size: 200 MB.",
+        help="Supported formats: MP4 and MOV. Maximum size: 500 MB.",
     )
 
-    # Clear old results and stop when no video is currently selected.
-    if uploaded_file is None:
-        # Remove any previous evaluation from Streamlit's session state.
-        st.session_state.pop("evaluation", None)
-        # Remove the previous file identity from Streamlit's session state.
-        st.session_state.pop("uploaded_signature", None)
-        # Tell the user what kind of action starts the workflow.
-        st.info("Select an MP4 or MOV video to get started.")
-        # Leave main because there is no file to analyze yet.
-        return
+    # Offer samples as a quiet secondary path below the main upload control.
+    with st.expander("Try a sample video", expanded=False):
+        st.caption("Preview an example and see how Hook Checker evaluates it.")
+        sample_columns = st.columns(2)
+        sample_clicked = None
+        for column, (sample_id, sample) in zip(
+            sample_columns, SAMPLE_VIDEOS.items()
+        ):
+            with column:
+                sample_available = sample["path"].is_file()
+                if st.button(
+                    sample["label"],
+                    key=f"sample_{sample_id}",
+                    disabled=not sample_available,
+                    use_container_width=True,
+                ):
+                    sample_clicked = sample_id
+                st.caption(sample["description"])
+                if not sample_available:
+                    st.caption("Add the matching file to assets/samples.")
 
     # Identify the selected upload by both its filename and its byte size.
-    uploaded_signature = (uploaded_file.name, uploaded_file.size)
-    # Reset old results when the selected upload is different from the previous one.
-    if st.session_state.get("uploaded_signature") != uploaded_signature:
-        # Remove the evaluation belonging to the previous upload.
-        st.session_state.pop("evaluation", None)
-        # Remember the current upload for the next rerun of the Streamlit script.
+    uploaded_signature = (
+        (uploaded_file.name, uploaded_file.size)
+        if uploaded_file is not None
+        else None
+    )
+    # A new upload becomes the active source and clears an older result.
+    if (
+        uploaded_signature is not None
+        and uploaded_signature != st.session_state.get("uploaded_signature")
+        and sample_clicked is None
+    ):
         st.session_state["uploaded_signature"] = uploaded_signature
+        st.session_state["active_source"] = ("upload", uploaded_signature)
+        st.session_state.pop("evaluation", None)
+    elif uploaded_signature is None:
+        st.session_state.pop("uploaded_signature", None)
+        if st.session_state.get("active_source", (None,))[0] == "upload":
+            st.session_state.pop("active_source", None)
+            st.session_state.pop("evaluation", None)
+
+    # A sample selection takes precedence for this rerun and starts analysis immediately.
+    if sample_clicked is not None:
+        st.session_state["active_source"] = ("sample", sample_clicked)
+        st.session_state.pop("evaluation", None)
+
+    # Resolve the active source after both controls have rendered.
+    active_source = st.session_state.get("active_source")
+    active_path = None
+    if active_source and active_source[0] == "sample":
+        # Resolve the selected sample from its stable identifier.
+        active_path = SAMPLE_VIDEOS[active_source[1]]["path"]
+        # Keep the sample watchable while its analysis runs.
+        if active_path.is_file():
+            st.video(str(active_path), width=SAMPLE_VIDEO_WIDTH)
+    elif active_source and active_source[0] == "upload" and uploaded_file is not None:
+        # Keep an uploaded video watchable while it is being analyzed.
+        st.video(uploaded_file)
+
+    # Show a neutral prompt when the user has not selected a source yet.
+    if active_source is None:
+        st.info("Select an MP4 or MOV video to get started.")
+        return
 
     # Reject files larger than the application's configured maximum.
-    if uploaded_file.size > MAX_UPLOAD_SIZE:
+    if uploaded_file is not None and uploaded_file.size > MAX_UPLOAD_SIZE:
         # Explain why the selected video cannot be processed.
         st.error("The video is larger than the 500 MB limit.")
         # Stop before reading or processing an oversized file.
@@ -549,11 +622,20 @@ def main():
         # Stop before displaying an unusable Analyze button workflow.
         return
 
-    # Begin analysis only after the user presses the primary action button.
-    if st.button("Analyze video", type="primary"):
+    # Keep explicit analysis for uploads; samples analyze as soon as they are chosen.
+    analyze_upload = active_source[0] == "upload" and st.button(
+        "Analyze video", type="primary"
+    )
+    if sample_clicked is not None or analyze_upload:
         try:
-            # Process the uploaded file and save the JSON result in session state.
-            st.session_state["evaluation"] = process_video(uploaded_file, api_key)
+            # Process the selected sample directly from its bundled path.
+            if active_source[0] == "sample":
+                st.session_state["evaluation"] = process_video(active_path, api_key)
+            else:
+                # Process an upload through the shared path-based workflow.
+                st.session_state["evaluation"] = process_uploaded_video(
+                    uploaded_file, api_key
+                )
         except Exception as error:
             # Remove any incomplete result when processing fails.
             st.session_state.pop("evaluation", None)

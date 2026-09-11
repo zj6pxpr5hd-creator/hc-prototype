@@ -1,0 +1,2 @@
+1. Implement create a card for DMs feature - 
+2. implement try sample video feature - DONE
